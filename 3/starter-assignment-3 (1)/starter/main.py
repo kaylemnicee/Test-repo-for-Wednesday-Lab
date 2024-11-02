@@ -130,7 +130,7 @@ def evaluate(node, target_program, gs, max_tick):
     score += winToScore(0, win)
     win, auxiliary_score1 = playout(gs,a1,a2,1,max_tick,False,eval)
     score += winToScore(1, win)
-        
+
     return score/2,(auxiliary_score0+auxiliary_score1)/2
 
 def visualize_game(program_1, program_2):
@@ -150,105 +150,67 @@ def search(target_program, neighborhood_function, num_neighbors, max_tick, map):
     utt = UnitTypeTable(2)
     pgs = PhysicalGameState.load(map, utt)
     gs = GameState(pgs, utt)
-    prog = ScriptsToy.scriptEmpty()
     found_optimal = False
-    random_restart= True # False for part 1, True for part 2 (using random restart)
+    random_restart = True
+    candidates = []
+    total_number_evaluations = 0
 
-    best_eval, best_auxiliary = evaluate(prog, target_program, gs, max_tick)
+    while not found_optimal:
+        start_time = time.time()
+        # 50% chance: continue from best candidate, else random restart
+        if random.random() < 0.5 and candidates:
+            print("\n\tCase 1: Improving on best candidate")
+            program = max(candidates, key=lambda x: (x.best_eval, x.best_auxiliary))
+            prog = program.prog
+            print("\t\tContinuing from best candidate:", program)
+        else:
+            print("\n\tCase 2: Random restart")
+            prog = ScriptsToy.scriptEmpty()
 
-    candidates = [Program(prog, best_eval, best_auxiliary,0)] #used to keep track of the best programs
-    
-    # Random restarts turned off
-    if random_restart == False:
-        prog, total_number_evaluations, best_eval, best_auxiliary = hill_climb(target_program, neighborhood_function, num_neighbors, max_tick,prog, utt, pgs, gs, 0)
-        return prog, total_number_evaluations
-    
-    # Random restarts turned on
-    else:
-        while not found_optimal:
-            print("START\nCurrent list of candidates: ", candidates)
-            start_time = time.time()
-            #  with 50% chance, seed the search with the best program
-            if random.random() < 0.5:
-                print("\n\tCase 1: Going to improve on ")
-                program = max(candidates) # get the best candidate
-                print("\t\tContinuing through a previous best path from: ", str(program))
-                # try to explore more with this candidate
-                prog, total_number_evaluations, best_eval, best_auxiliary = hill_climb(target_program, neighborhood_function, num_neighbors, max_tick, program.get_prog(), utt, pgs, gs, program.get_total_number_evaluations() )
-                # add this new candidate to our list of candidates so far
-                candidate = Program(prog, best_eval, best_auxiliary, total_number_evaluations)
-                candidates.append(candidate)
-                end_time = time.time()
-                elapsed_time = end_time - start_time
-                print(f"\t\tFunction executed in {elapsed_time:.4f} seconds for case 1")
+        best_eval, best_auxiliary = evaluate(prog, target_program, gs, max_tick)
+        print("\tInitial evaluation score:", best_eval, ", Auxiliary:", best_auxiliary)
+        improved = True
 
-            # the other 50% chance, generate a random hill climb
-            else:
-                print("\n\tCase 2: Doing a random restart")
-                restart_prog = ScriptsToy.scriptEmpty()
-                restart_prog, total_number_evaluations, best_eval, best_auxiliary = hill_climb(target_program, neighborhood_function, num_neighbors, max_tick, restart_prog, utt, pgs, gs, 0)
-                candidate = Program(restart_prog, best_eval, best_auxiliary, total_number_evaluations)
-                print("\t\tResults:", str(candidate))
-                candidates.append(candidate)
+        while improved and best_eval < 1.0:
+            improved = False
+            print("\n\tNEWLOOP: Hill climbing with", num_neighbors, "neighbors")
+            start_time_neighbors = time.time()
+            neighbors = neighborhood_function.get_neighbors(prog, num_neighbors)
+            elapsed_time_neighbors = time.time() - start_time_neighbors
+            print(f"\t\tGenerated neighbors in {elapsed_time_neighbors:.4f} seconds")
 
-                end_time = time.time()
-                elapsed_time = end_time - start_time
-                print(f"\t\tFunction executed in {elapsed_time:.4f} seconds for case 2")
+            for neighbor in neighbors:
+                start_time_eval = time.time()
+                eval_score, aux_score = evaluate(neighbor, target_program, gs, max_tick)
+                elapsed_time_eval = time.time() - start_time_eval
+                print(f"\t\tEvaluated neighbor in {elapsed_time_eval:.4f} seconds")
 
-            print("\nHaven't found optimal, trying again:")
+                total_number_evaluations += 1
 
-            # found the solution!
-            if best_eval >= 1:
-                found_optimal = True 
-                print("\nSolution found, exiting loop.")
+                # Update best scores if neighbor is better
+                if eval_score > best_eval or (eval_score == best_eval and aux_score > best_auxiliary):
+                    print("\t\t\tFound new best --> Eval:", eval_score, ", Aux:", aux_score)
+                    prog = neighbor
+                    best_eval = eval_score
+                    best_auxiliary = aux_score
+                    improved = True
+
+                # Stop search if optimal solution found
+                if best_eval == 1.0:
+                    found_optimal = True
+                    print("\nSolution found! Exiting.")
+                    break
+
+            if not improved:
+                print("\t\tNo improvement from hill climbing")
+                if random_restart:
+                    candidates.append(Program(prog, best_eval, best_auxiliary, total_number_evaluations))
+
+        elapsed_time_search = time.time() - start_time
+        print(f"\tIteration completed in {elapsed_time_search:.4f} seconds")
 
     return prog, total_number_evaluations
 
-def hill_climb(target_program, neighborhood_function, num_neighbors, max_tick, prog, utt, pgs, gs, total_number_evaluations):
-    best_eval, best_auxiliary = evaluate(prog, target_program, gs, max_tick)
-    
-    while best_eval < 1.0:
-        improved = False 
-        print("\n\n\t NEWLOOP: Hill climbing with ", num_neighbors," neighbours.")
-        # we'll generate random list of neighbours of the prog
-        start_time = time.time()
-
-        neighbors = neighborhood_function.get_neighbors(prog, num_neighbors)
-
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        print(f"\t\tFunction executed in {elapsed_time:.4f} seconds for 'get_neighbours'")
-        
-        # evaluate every neighbor of prog
-        for neighbor in neighbors:
-            start_time = time.time()
-            eval_score, aux_score = evaluate(neighbor, target_program, gs, max_tick)
-            
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            print(f"\t\tFunction executed in {elapsed_time:.4f} seconds for 'evualate'")
-            
-            total_number_evaluations += 1
-
-            # if neighbor is better (score or auxiliary score in case of tie)
-            if eval_score > best_eval or (eval_score == best_eval and aux_score > best_auxiliary):
-                #set as the new best
-                print("\t\t\tFound new best -->", str(eval_score),"\n")
-                prog = neighbor
-                best_eval = eval_score
-                best_auxiliary = aux_score
-                improved = True
-
-            # if the best response has been found, return sol
-            if best_eval == 1.0:
-                return prog, total_number_evaluations, best_eval, best_auxiliary
-
-        # if no improvement was made, break 
-        if not improved:
-            print("\t\t\t Didn't improve from hill climb")
-            break
-
-    return prog, total_number_evaluations, best_eval, best_auxiliary
 
 if __name__ == "__main__":
     random.seed(23)
